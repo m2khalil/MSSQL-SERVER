@@ -1,0 +1,326 @@
+-- check if the default trace is enabled for capturing configuration
+SELECT name, CASE WHEN value_in_use=1 THEN 'ENABLED'
+WHEN value_in_use=0 THEN 'DISABLED'
+END AS [status]
+FROM sys.configurations
+WHERE name='default trace enabled'
+
+--- list changes recorded in mssql configurations
+SELECT
+	T.DatabaseName,
+	T.TextData,
+	T.HostName,
+	T.ApplicationName,
+	T.LoginName,
+	T.StartTime,T.EventClass,
+    CASE T.IsSystem
+		WHEN 1 THEN 'YES'
+		ELSE 'NO'
+		END AS IsSystem
+FROM sys.FN_TRACE_GETTABLE(CONVERT(VARCHAR(150), 
+	( SELECT TOP 1 f.[VALUE]                                                 
+		  FROM    sys.FN_TRACE_GETINFO(NULL) f
+		  WHERE   f.property = 2
+		)), DEFAULT) T
+
+WHERE T.TextData LIKE '%configuration option%'
+	AND T.EventClass = 22 -- Configuration related
+	Order by t.starttime desc;
+	
+
+-- events for configuration in default traces.
+SELECT name
+FROM sys.trace_events
+WHERE trace_event_id IN (22, 116)
+
+
+--- SQL SERVER services information, like service account
+
+SELECT *
+FROM sys.dm_server_services
+
+-- finding if the file initiazliation is enabled
+SELECT servicename, instant_file_initialization_enabled
+FROM sys.dm_server_services
+WHERE filename LIKE '%sqlservr.exe%';
+
+
+-- https://www.microsoftpressstore.com/articles/article.aspx?p=3004575&seqNum=2
+The default instance is reachable by connecting to the name of the Windows Server, 
+whereas named instances require an instance name, for example, Servername\InstanceName. 
+The SQL Browser service is required to handle traffic for named instances on the SQL Server.
+
+
+The server collation you set here acts as the collation for all system databases as well as the default for any newly created
+user databases. In SQL Server 2019 and for new application development, you may choose to take advantage of the new support for UTF-8 
+collations as the server default. Pictured below is the new interface in SQL Server Setup for choosing a UTF-8 collation.
+
+
+
+--- excluding sql from antivirus
+Configuring antivirus exclusions
+Configure any antivirus software installed on the SQL Server to ignore scanning files with extensions used by your SQL Server data and log files. Typically, these will be .mdf, .ldf, and .ndf.
+Also, configure any antivirus programs to ignore folders containing SQL Server files. This could include:
+
+Full-text catalog files
+Backup files
+Replication snapshot files
+SQL Server trace (.trc) files
+SQL Audit files
+Analysis Services database
+Log and backup files
+FILESTREAM and FileTable folders
+SQL Server Reporting Services temp files and log files
+Processes might also be affected, so set antivirus programs to ignore the programs for all instances of the SQL Server Database Engine service, Reporting Services service, Analysis Services service, 
+and R Server (RTerm.exe and BxlServer.exe).
+In SQL Server Failover Cluter Instances (FCIs) and availability groups, also configure antivirus software to exclude the MSCS folder on the quorum drive if in use, 
+the MSDTC directory on the MSDTC share, and the Windows\Cluster folder on each cluster node, if they exist.
+
+
+
+-- checking whether lock pages in mssql is enabled
+SELECT sql_memory_model_desc
+FROM sys.dm_os_sys_info;
+--CONVENTIONAL = Lock pages in memory privilege is not granted
+--LOCK_PAGES = Lock pages in memory privilege is granted
+--LARGE_PAGES = Lock pages in memory privilege is granted in Enterprise mode
+--  with Trace Flag 834 ON
+
+
+--- backup of database 
+Begin taking database backups, at least of the master and msdb databases. 
+You should also back up other SQL Server Setup-created databases, including ReportServer, ReportServerTempDB, and SSISDB right away.
+
+
+
+---For more information on service master and database master keys
+To back up the instance service master key, use the following:
+
+BACKUP SERVICE MASTER KEY TO FILE = 'localfilepath_or_UNC' ENCRYPTION BY PASSWORD ='complexpassword'
+
+And as soon as database master keys come into existence in each user database, for example as you implement features like Transparent Data Encryption (TDE) or column data encryption, 
+back up individual database master keys, as follows:
+
+BACKUP MASTER KEY TO FILE = 'localfilepath_or_UNC' ENCRYPTION BY PASSWORD ='complexpassword'
+
+
+--- Suppressing successful backup jobs log in log file
+Add the trace flag as a startup parameter to the SQL Server Database Engine service by using SQL Server Configuration Manager. 
+In the Properties of the SQL Server service, go to the Startup Parameters tab, and use the syntax -Tflagnumber. 
+This field is essentially adding parameters that are passed to the sqlserver.exe executable. For example, add “-T3226”, then click Add. 
+The change will not take effect until the SQL Server Database Engine service is restarted.
+
+
+--- Increase number of log files 
+In SQL Server Management Studio, in Object Explorer, connect to the SQL Server instance. Expand the Management folder, 
+right-click SQL Server Logs, and then, on the shortcut menu, click Configure. Select the Limit The Number Of Error Logs Before 
+They Are Recycled check box and type a value larger than 6. You might find that a value between 25 and 50 will result in more useful log history contained for multiple business cycles.
+
+
+above notes were taken from following link
+https://www.microsoftpressstore.com/store/sql-server-2019-administration-inside-out-9780135561089#downloads
+
+
+--- Size and number of error logs
+DECLARE @logfiles TABLE (
+       [FilArchive#] TINYINT,
+       [Date] DATETIME,		 
+       [LogFileSizeB] BIGINT 
+)
+
+
+INSERT @logfiles
+EXEC xp_enumerrorlogs
+
+SELECT
+       [FilArchive#],
+       [Date],
+       CONVERT(VARCHAR(50),CAST(SUM(CAST([LogFileSizeB] AS FLOAT)) / 1024 / 1024 AS DECIMAL(10,4))) + ' MB' SizeMB
+FROM
+       @logfiles
+GROUP BY
+       [FilArchive#],
+       [Date],
+       [LogFileSizeB];
+
+-- to identify error log file location
+SELECT SERVERPROPERTY('ErrorLogFileName') [Error_Log_Location];
+
+
+
+--- getting SQL Server instances on your network?
+
+Open a CMD prompt, maneuver to whatever directory you choose, and type the following:
+
+SQLCMD -L >SQLservers.txt
+Press ENTER.
+
+
+
+---- sql server authentication mode
+SELECT CASE SERVERPROPERTY('IsIntegratedSecurityOnly')
+ WHEN 1 THEN 'Windows Authentication'
+ WHEN 0 THEN 'Windows and SQL Server Authentication' 
+END as [Authentication Mode]
+
+
+
+----- SQL login (no domain account), failed login date, password expiry date, last reset of password etc..
+ SELECT
+     name [SQL Login],
+     CASE WHEN is_policy_checked = 0 THEN 'Disabled'
+        WHEN is_policy_checked = 1 THEN 'Enabled' END 
+     [Enforce Password Policy],
+     CASE WHEN is_expiration_checked = 0 THEN 'Disabled' 
+        WHEN is_expiration_checked = 1 THEN 'Enabled' END   
+     [Enforce Password Expiration],
+     CASE LOGINPROPERTY(name, 'IsLocked')
+        WHEN 0 THEN 'No'
+        WHEN 1 THEN 'Yes'
+        ELSE 'Unknown' END as IsLocked,
+     LOGINPROPERTY(name, 'PasswordLastSetTime') 
+     [PasswordSetDate],
+     LOGINPROPERTY(name, 'BadPasswordCount') 
+     [FailedLoginAttempts],
+     LOGINPROPERTY(name, 'BadPasswordTime') [LastFailedLogin],
+     LOGINPROPERTY(name, 'LockoutTime') [LockedOutDate],
+     CASE LOGINPROPERTY(name, 'IsExpired')
+        WHEN 0 THEN 'Password is not expired'
+        WHEN 1 THEN 'Password is not expired, change it'
+        ELSE 'Unknown' END [PasswordExpired],
+     CASE LOGINPROPERTY(name, 'IsMustChange')
+        WHEN 0 THEN 'Must not change password at next login'
+        WHEN 1 THEN 'Must change password at next login'
+        ELSE 'Unknown' END [PasswordChangeOnNextLogin],
+     LOGINPROPERTY(name, 'DaysUntilExpiration')    
+     [DaysUntilPasswordExpires]
+   FROM 
+     sys.sql_logins
+   WHERE 
+     [name] NOT LIKE '##%'
+   ORDER BY  7 desc
+   
+   
+   
+--- /* SQL Server transactions per day/hour/minute using sys.dm_os_performance_counters */
+
+       -- declarations
+       DECLARE      
+              @Days SMALLINT,
+              @Hours INT,
+              @Minutes BIGINT,
+              @LastRestart DATETIME;
+
+       -- get last restart date
+       SELECT 
+              @Days = DATEDIFF(D, create_date, GETDATE()),@LastRestart = create_date
+       FROM   
+              sys.databases
+       WHERE  
+              database_id = 2;
+
+       -- collect days/hours since last restart
+       SELECT @Days = CASE WHEN @Days = 0 THEN 1 ELSE @Days END;
+       SELECT @Hours = @Days * 24;
+       SELECT @Minutes = @Hours * 60;
+
+
+       -- trans since last restart
+       SELECT 
+              @LastRestart [LastRestart],
+              @@servername [Instance],
+              cntr_value [TotalTransSinceLastRestart],
+              cntr_value / @Days   [AvgTransPerDay],
+              cntr_value / @Hours  [AvgTransPerHour],
+              cntr_value / @Minutes [AvgTransPerMinute]
+       FROM
+              sys.dm_os_performance_counters
+       WHERE  
+              counter_name = 'Transactions/sec'
+              AND instance_name = '_Total';
+
+
+       -- trans since last restart per database
+       SELECT 
+              @LastRestart [LastRestart],
+              @@servername [Instance],
+              instance_name [Database_Name],
+              cntr_value [TotalTransSinceLastRestart],
+              cntr_value / @Days [AvgTransPerDay],
+              cntr_value / @Hours  [AvgTransPerHour],
+              cntr_value / @Minutes [AvgTransPerMinute]
+       FROM  
+              sys.dm_os_performance_counters
+       WHERE  
+              counter_name = 'Transactions/sec'
+              AND instance_name <> '_Total'
+       ORDER BY
+              cntr_value DESC;   
+			  
+			  
+-- Determine location for the Default Trace file. Applies to SQL 2005-2019.
+-- Declare temp variable to store trace file location.
+DECLARE @TraceInfo TABLE
+(TraceID INT,
+Property INT,
+Value VARCHAR(MAX) ) ;
+INSERT INTO @TraceInfo select TraceId, Property, CONVERT(VARCHAR(max), Value) AS [Value] FROM :: fn_trace_getinfo (default) ;
+DECLARE @AuditLoginTracePath NVARCHAR(256) = (SELECT [VALUE] FROM @TraceInfo WHERE [Value] LIKE '%MSSQL%log[_]%.trc') ;
+
+-- Query Default Trace for any shrinkfile events.
+SELECT
+TextData,
+HostName,
+ApplicationName,
+LoginName,
+StartTime
+FROM
+[fn_trace_gettable](@AuditLoginTracePath, DEFAULT)
+WHERE
+TextData LIKE 'DBCC SHRINKFILE%' ;
+
+
+
+
+---- To get the total physical memory installed on SQL Server
+SELECT [total_physical_memory_kb] / 1024 AS [Total_Physical_Memory_In_MB]
+    ,[available_page_file_kb] / 1024 AS [Available_Physical_Memory_In_MB]
+    ,[total_page_file_kb] / 1024 AS [Total_Page_File_In_MB]
+    ,[available_page_file_kb] / 1024 AS [Available_Page_File_MB]
+    ,[kernel_paged_pool_kb] / 1024 AS [Kernel_Paged_Pool_MB]
+    ,[kernel_nonpaged_pool_kb] / 1024 AS [Kernel_Nonpaged_Pool_MB]
+    ,[system_memory_state_desc] AS [System_Memory_State_Desc]
+FROM [master].[sys].[dm_os_sys_memory]
+ 
+--To get the minimum and maximum size of memory configured for SQL Server.
+SELECT [name] AS [Name]
+    ,[configuration_id] AS [Number]
+    ,[minimum] AS [Minimum]
+    ,[maximum] AS [Maximum]
+    ,[is_dynamic] AS [Dynamic]
+    ,[is_advanced] AS [Advanced]
+    ,[value] AS [ConfigValue]
+    ,[value_in_use] AS [RunValue]
+    ,[description] AS [Description]
+FROM [master].[sys].[configurations]
+WHERE NAME IN ('Min server memory (MB)', 'Max server memory (MB)')
+
+
+
+---- restoring msdb database
+USE [master] 
+ALTER DATABASE [msdb] 
+SET single_user WITH 
+ROLLBACK immediate 
+RESTORE DATABASE [msdb] FROM DISK = N'C:\SQLSysBackup\msdb.bak' WITH FILE = 1, 
+nounload, replace, stats = 5 
+ALTER DATABASE [msdb] 
+SET multi_user 
+go
+
+
+----- 
+
+
+
+
