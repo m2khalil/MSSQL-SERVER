@@ -1,0 +1,85 @@
+--- check the port for endpoint
+select name, type, port from sys.tcp_endpoints where type_desc='database_mirroring'
+
+
+---- check endpoints are created/ started
+:Connect SN003-MKM
+select name, state_desc, port from sys.tcp_endpoints where type_desc='DATABASE_MIRRORING'
+go
+:Connect SN004-MKM
+select name, state_desc, port from sys.tcp_endpoints where type_desc='DATABASE_MIRRORING'
+go
+:Connect SN005-MKM
+select name, state_desc, port from sys.tcp_endpoints where type_desc='DATABASE_MIRRORING'
+go
+:Connect SN006-MKM
+select name, state_desc, port from sys.tcp_endpoints where type_desc='DATABASE_MIRRORING'
+go
+
+---- if some endpoint is not started then start it
+:Connect SN003-MKM
+alter endpoint [Hadr_endpoint] state = started
+
+---If endpoint is not there then create it
+:Connect SQLNODE1
+create endpoint [Hadr_endpoint] 
+ state=started
+ as tcp (listener_port = 5022, listener_ip = all)
+ for database_mirroring (role = all, authentication = windows negotiate, encryption = required algorithm aes)
+go
+
+---- SQL Server service accounts not added to SQL Server Instances
+There should Grant CONNECT permission on Always On endpoint.
+
+---- We can obtain the endpoints list using the command:
+select * from sys.endpoints;
+We can grant connect permission on endpoint using the command given below:
+GRANT CONNECT on ENDPOINT::Endpoint_Name TO [login_name];
+
+
+
+-------- endpoint status on all replicas
+:Connect SN003-MKM
+--Run below command to check endpoint state 
+select distinct r.replica_server_name, r.endpoint_url,
+rs.connected_state_desc, rs.last_connect_error_description, 
+rs.last_connect_error_number, rs.last_connect_error_timestamp 
+from sys.dm_hadr_availability_replica_states rs join sys.availability_replicas r
+on rs.replica_id=r.replica_id
+where rs.is_local=1
+go
+:Connect SN0033-MKM
+--Run below command to check endpoint state 
+select distinct r.replica_server_name, r.endpoint_url,
+rs.connected_state_desc, rs.last_connect_error_description, 
+rs.last_connect_error_number, rs.last_connect_error_timestamp 
+from sys.dm_hadr_availability_replica_states rs join sys.availability_replicas r
+on rs.replica_id=r.replica_id
+where rs.is_local=1
+go
+:Connect SN0013-MKM
+--Run below command to check endpoint state 
+select distinct r.replica_server_name, r.endpoint_url,
+rs.connected_state_desc, rs.last_connect_error_description, 
+rs.last_connect_error_number, rs.last_connect_error_timestamp 
+from sys.dm_hadr_availability_replica_states rs join sys.availability_replicas r
+on rs.replica_id=r.replica_id
+where rs.is_local=1
+go
+:Connect SN0023-MKM
+--Run below command to check endpoint state 
+select distinct r.replica_server_name, r.endpoint_url,
+rs.connected_state_desc, rs.last_connect_error_description, 
+rs.last_connect_error_number, rs.last_connect_error_timestamp 
+from sys.dm_hadr_availability_replica_states rs join sys.availability_replicas r
+on rs.replica_id=r.replica_id
+where rs.is_local=1
+go
+
+
+As per MSDN "Port 5022 is used by the primary and secondary replicas for synchronization and communication purposes. 
+Traffic must be allowed inbound on this port. Testing has shown that if port 5022 inbound traffic is blocked at the primary, 
+at the secondary or at both, you will be unable to create the availability group and message 35250 will be reported."
+
+
+
