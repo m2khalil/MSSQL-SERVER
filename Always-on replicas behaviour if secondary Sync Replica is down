@@ -1,0 +1,27 @@
+https://www.sqlshack.com/data-synchronization-in-sql-server-always-on-availability-groups/
+==============================================================
+
+Synchronized AlwaysON with Secondary replica down
+
+Suppose we have two synchronous node data commit AlwaysOn in our environment. As stated earlier, Primary replica waits for the acknowledgement from Secondary replica 
+and then only sends an acknowledgement. If Secondary AG instance is down, SQL Server will not be able to deliver transaction log records to the secondary replica.
+
+Think about it. We can get a few questions such as following.
+
+What will be the transaction behavior in this case?
+Do users get transaction commit message?
+We can view this scenario in the following screenshot.
+
+SQL Server Always On Availability Groups - Windows Failover Clustering
+
+In SQL Server Availability groups checks the status of each replica based on a parameter Session-Timeout. 
+By default, its value is 10 seconds. It shows that the Primary replica waits for 10 seconds for a ping response. If it does not receive any response from the secondary replica, 
+SQL Server change Synchronous data commit to Asynchronous data commits as a temporary measure. Due to this change, users will not face any issues while executing DML. 
+Users will receive commit acknowledgement as soon as it gets committed in Primary replica.
+
+
+Once the secondary replica is available and connects with the Primary replica, it again starts Synchronous data commit. 
+SQL Server maintains the log entries until the time secondary replica becomes available. Once it reconnects with Secondary replica, it sends all log blocks as per the usual process. 
+It increases the transaction log size in Primary replica until the secondary replica is unavailable.
+If you remove the Secondary database from the availability group, SQL Server does not hold any transaction log records. If it takes longer to fix issues with the secondary replica, 
+it is good to remove the replica from the availability group.
